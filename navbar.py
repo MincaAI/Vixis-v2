@@ -151,16 +151,15 @@ def navbar():
         st.markdown(f'<p style="font-size: 14px; color: #333; margin-top: 4px; margin-bottom: 2px; font-family: Arial, sans-serif;">Date: {current_paris_time}</p>', unsafe_allow_html=True)
         
         # Add user info
-        user_email = "User: " + st.user.name
+        user_email = "User: " + st.session_state.get("user_email", "Unknown")
         st.markdown(f'<p style="font-size: 14px; color: #333; margin-top: 2px; font-family: Arial, sans-serif;">{user_email}</p>', unsafe_allow_html=True)
         
         # Add more vertical space before logout button
         st.markdown("<br><br><br><br>", unsafe_allow_html=True)
         
-        # Logout Button aligned with Update Data
+        # Logout Button - redirects to Azure Easy Auth logout
         col1, col2 = st.columns([2,1])
         with col1:
-            if st.button("🚪 Logout", key="logout"):
-                st.logout()
+            st.markdown('<a href="/.auth/logout" target="_self"><button style="background: linear-gradient(90deg, #ff4b4b, #ff6b6b); color: white; font-size: 16px; font-weight: bold; padding: 10px 20px; border-radius: 8px; cursor: pointer; border: none; width: 100%;">🚪 Logout</button></a>', unsafe_allow_html=True)
 
         st.markdown('</div>', unsafe_allow_html=True)
