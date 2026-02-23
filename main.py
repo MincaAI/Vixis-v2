@@ -1,5 +1,4 @@
 import streamlit as st
-import os
 
 # Must be the first Streamlit command (before any other st.* calls)
 st.set_page_config(page_title="Financial Report Generator", layout="wide")
@@ -11,20 +10,16 @@ from interface import interface
 from interface1 import interface1
 
 
-def get_user_email():
-    """Get user email from Azure Easy Auth headers or environment"""
-    # Try to get from environment (Azure Easy Auth sets this)
-    user_email = os.getenv("X-MS-CLIENT-PRINCIPAL-NAME", None)
-    if not user_email:
-        # Fallback for local development
-        user_email = os.getenv("USER_EMAIL", "dev@local.com")
-    return user_email
-
-
 if __name__ == "__main__":
-    # Store user email in session state for use in navbar
+    # Check if user is logged in
+    if not st.user.is_logged_in:
+        st.header("Veuillez vous connecter pour continuer.")
+        st.button("Se connecter avec Microsoft", on_click=st.login)
+        st.stop()
+
+    # Store user email in session state
     if "user_email" not in st.session_state:
-        st.session_state.user_email = get_user_email()
+        st.session_state.user_email = st.user.email or "Unknown"
 
     if "selected_page" not in st.session_state:
         st.session_state.selected_page = "Note d’analyse sectorielle"

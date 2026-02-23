@@ -157,9 +157,10 @@ def navbar():
         # Add more vertical space before logout button
         st.markdown("<br><br><br><br>", unsafe_allow_html=True)
         
-        # Logout Button - redirects to Azure Easy Auth logout
+        # Logout Button
         col1, col2 = st.columns([2,1])
         with col1:
-            st.markdown('<a href="/.auth/logout" target="_self"><button style="background: linear-gradient(90deg, #ff4b4b, #ff6b6b); color: white; font-size: 16px; font-weight: bold; padding: 10px 20px; border-radius: 8px; cursor: pointer; border: none; width: 100%;">🚪 Logout</button></a>', unsafe_allow_html=True)
+            if st.button("🚪 Logout", key="logout"):
+                st.logout()
 
         st.markdown('</div>', unsafe_allow_html=True)
