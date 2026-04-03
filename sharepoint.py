@@ -10,25 +10,99 @@ import streamlit as st
 # Load environment variables from .env file
 load_dotenv()
 
+_SHAREPOINT_KEYS = (
+    "TENANT_ID",
+    "CLIENT_ID",
+    "CLIENT_SECRET",
+    "RESOURCE",
+    "SITE_URL",
+    "DRIVE_ID",
+    "FOLDER_ID",
+    "MONGO_URL",
+    "DB_NAME",
+)
+
+
+def _nonempty(val):
+    if val is None:
+        return False
+    if isinstance(val, str):
+        return bool(val.strip())
+    return True
+
+
 def _get_sharepoint_secrets():
-    """Secrets from Streamlit Cloud dashboard or .env. Avoids KeyError if [sharepoint] not set."""
+    """Merge [sharepoint] / [mongodb] from st.secrets with Azure App Service / .env vars.
+
+    If TOML contains empty strings, dict.get(key, os.getenv) would NOT fall back to env;
+    we fill missing/empty keys from os.environ (and RESSOURCE typo for RESOURCE).
+    """
+    out = {}
     try:
-        return dict(st.secrets.get("sharepoint", {}))
+        sp = st.secrets.get("sharepoint", {})
+        if isinstance(sp, dict):
+            out.update(sp)
     except Exception:
-        return {}
+        pass
+    for sec_name in ("mongodb", "mongo"):
+        try:
+            block = st.secrets.get(sec_name, {})
+            if isinstance(block, dict):
+                for k in ("MONGO_URL", "DB_NAME"):
+                    if k in block:
+                        out[k] = block[k]
+        except Exception:
+            pass
+    for k in _SHAREPOINT_KEYS:
+        if not _nonempty(out.get(k)):
+            v = os.getenv(k)
+            if k == "RESOURCE" and not _nonempty(v):
+                v = os.getenv("RESSOURCE")
+            if _nonempty(v):
+                out[k] = v.strip() if isinstance(v, str) else v
+    # region agent log
+    try:
+        import time
+        _lp = "/Users/tanguymoutte/Vixis-main/.cursor/debug-2882f5.log"
+        with open(_lp, "a") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "2882f5",
+                        "hypothesisId": "H1-empty-toml-blocks-env",
+                        "location": "sharepoint.py:_get_sharepoint_secrets",
+                        "message": "merged config presence (no secret values)",
+                        "data": {
+                            "has_tenant": _nonempty(out.get("TENANT_ID")),
+                            "has_client": _nonempty(out.get("CLIENT_ID")),
+                            "has_secret": _nonempty(out.get("CLIENT_SECRET")),
+                            "has_site": _nonempty(out.get("SITE_URL")),
+                            "has_mongo": _nonempty(out.get("MONGO_URL")),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
+    return out
 
 
 class SharePointClient:
     def __init__(self):
         secrets = _get_sharepoint_secrets()
-        self.tenant_id = secrets.get("TENANT_ID", os.getenv("TENANT_ID"))
-        self.client_id = secrets.get("CLIENT_ID", os.getenv("CLIENT_ID"))
-        self.client_secret = secrets.get("CLIENT_SECRET", os.getenv("CLIENT_SECRET"))
-        self.resource_url = secrets.get("RESOURCE", os.getenv("RESOURCE"))
+        self.tenant_id = secrets.get("TENANT_ID")
+        self.client_id = secrets.get("CLIENT_ID")
+        self.client_secret = secrets.get("CLIENT_SECRET")
+        self.resource_url = secrets.get("RESOURCE")
         self._secrets = secrets
         if not self.tenant_id or not self.client_id or not self.client_secret:
             raise ValueError(
-                "SharePoint/MongoDB non configurés. Sur Streamlit Cloud : réglages → Secrets → ajouter la section [sharepoint] avec TENANT_ID, CLIENT_ID, CLIENT_SECRET, SITE_URL, DRIVE_ID, FOLDER_ID, MONGO_URL, DB_NAME."
+                "SharePoint/MongoDB non configurés. "
+                "Streamlit Cloud : Secrets → section [sharepoint] avec TENANT_ID, CLIENT_ID, CLIENT_SECRET, SITE_URL, DRIVE_ID, FOLDER_ID, MONGO_URL, DB_NAME. "
+                "Azure App Service : variables d'environnement avec les mêmes noms (pas de chaînes vides)."
             )
         self.base_url = f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/token"
         self.headers = {'Content-Type': 'application/x-www-form-urlencoded'}
@@ -103,15 +177,18 @@ class SharePointClient:
 
         json_data = df.to_dict(orient="records")
         json_output = json.dumps(json_data, indent=4)
-        mongo_client = MongoDBClient(mongo_url=self._secrets.get('MONGO_URL', os.getenv('MONGO_URL')), db_name=self._secrets.get('DB_NAME', os.getenv('DB_NAME')))
+        mongo_client = MongoDBClient(
+            mongo_url=(self._secrets.get("MONGO_URL") or os.getenv("MONGO_URL")),
+            db_name=(self._secrets.get("DB_NAME") or os.getenv("DB_NAME")),
+        )
         mongo_client.update_collection('stock', json_data)
 
 
     def load_data(self):
-        site_url = self._secrets.get("SITE_URL", os.getenv("SITE_URL"))
+        site_url = self._secrets.get("SITE_URL") or os.getenv("SITE_URL")
         site_id = self.get_site_id(site_url)
 
-        drive_id = self._secrets.get("DRIVE_ID", os.getenv("DRIVE_ID"))
-        folder_id = self._secrets.get("FOLDER_ID", os.getenv("FOLDER_ID"))
+        drive_id = self._secrets.get("DRIVE_ID") or os.getenv("DRIVE_ID")
+        folder_id = self._secrets.get("FOLDER_ID") or os.getenv("FOLDER_ID")
         self.download_folder_contents(site_id, drive_id, folder_id)
 
