@@ -34,23 +34,22 @@ def _nonempty(val):
 def _get_sharepoint_secrets():
     """Merge [sharepoint] / [mongodb] from st.secrets with Azure App Service / .env vars.
 
-    If TOML contains empty strings, dict.get(key, os.getenv) would NOT fall back to env;
-    we fill missing/empty keys from os.environ (and RESSOURCE typo for RESOURCE).
+    Uses st.secrets["section"] (bracket access) because Streamlit's AttrDict
+    does not reliably support .get() for TOML sections.  Broad except to
+    handle KeyError, FileNotFoundError, and any Streamlit-internal exceptions.
     """
     out = {}
     try:
-        sp = st.secrets.get("sharepoint", {})
-        if isinstance(sp, dict):
-            out.update(sp)
+        section = st.secrets["sharepoint"]
+        out.update({key: section[key] for key in section})
     except Exception:
         pass
     for sec_name in ("mongodb", "mongo"):
         try:
-            block = st.secrets.get(sec_name, {})
-            if isinstance(block, dict):
-                for k in ("MONGO_URL", "DB_NAME"):
-                    if k in block:
-                        out[k] = block[k]
+            block = st.secrets[sec_name]
+            for k in ("MONGO_URL", "DB_NAME"):
+                if k in block:
+                    out[k] = block[k]
         except Exception:
             pass
     for k in _SHAREPOINT_KEYS:
