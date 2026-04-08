@@ -34,24 +34,22 @@ def _nonempty(val):
 def _get_sharepoint_secrets():
     """Merge [sharepoint] / [mongodb] from st.secrets with Azure App Service / .env vars.
 
-    If TOML contains empty strings, dict.get(key, os.getenv) would NOT fall back to env;
-    we fill missing/empty keys from os.environ (and RESSOURCE typo for RESOURCE).
+    Uses st.secrets["section"] (not .get()) because Streamlit's AttrDict
+    does not reliably support .get() for TOML sections.
     """
     out = {}
     try:
-        sp = st.secrets.get("sharepoint", {})
-        if isinstance(sp, dict):
-            out.update(sp)
-    except Exception:
+        section = st.secrets["sharepoint"]
+        out.update({key: section[key] for key in section})
+    except (KeyError, FileNotFoundError):
         pass
     for sec_name in ("mongodb", "mongo"):
         try:
-            block = st.secrets.get(sec_name, {})
-            if isinstance(block, dict):
-                for k in ("MONGO_URL", "DB_NAME"):
-                    if k in block:
-                        out[k] = block[k]
-        except Exception:
+            block = st.secrets[sec_name]
+            for k in ("MONGO_URL", "DB_NAME"):
+                if k in block:
+                    out[k] = block[k]
+        except (KeyError, FileNotFoundError):
             pass
     for k in _SHAREPOINT_KEYS:
         if not _nonempty(out.get(k)):
@@ -60,33 +58,6 @@ def _get_sharepoint_secrets():
                 v = os.getenv("RESSOURCE")
             if _nonempty(v):
                 out[k] = v.strip() if isinstance(v, str) else v
-    # region agent log
-    try:
-        import time
-        _lp = "/Users/tanguymoutte/Vixis-main/.cursor/debug-2882f5.log"
-        with open(_lp, "a") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "2882f5",
-                        "hypothesisId": "H1-empty-toml-blocks-env",
-                        "location": "sharepoint.py:_get_sharepoint_secrets",
-                        "message": "merged config presence (no secret values)",
-                        "data": {
-                            "has_tenant": _nonempty(out.get("TENANT_ID")),
-                            "has_client": _nonempty(out.get("CLIENT_ID")),
-                            "has_secret": _nonempty(out.get("CLIENT_SECRET")),
-                            "has_site": _nonempty(out.get("SITE_URL")),
-                            "has_mongo": _nonempty(out.get("MONGO_URL")),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # endregion
     return out
 
 
