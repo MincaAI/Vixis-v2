@@ -22,8 +22,6 @@ _SHAREPOINT_KEYS = (
     "DB_NAME",
 )
 
-# Azure often sets CLIENT_ID for Streamlit login (Minca app) — SharePoint/Graph needs VIXIS app.
-# Prefer these env vars for client credentials so they never clash with auth CLIENT_ID.
 _CRED_ENV_ALIASES = {
     "TENANT_ID": ("SHAREPOINT_TENANT_ID", "VIXIS_TENANT_ID", "TENANT_ID"),
     "CLIENT_ID": (
@@ -88,43 +86,21 @@ def _get_sharepoint_secrets():
             if _nonempty(v):
                 out[k] = v.strip() if isinstance(v, str) else v
     # region agent log
-    try:
-        import time
-        for _lp in (
-            "/Users/tanguymoutte/Vixis-main/.cursor/debug-2882f5.log",
-            "/tmp/vixis_sharepoint_debug.ndjson",
-        ):
-            try:
-                with open(_lp, "a") as _f:
-                    _f.write(
-                        json.dumps(
-                            {
-                                "sessionId": "2882f5",
-                                "hypothesisId": "H-env-merge",
-                                "location": "sharepoint.py:_get_sharepoint_secrets",
-                                "message": "merged config (no secrets)",
-                                "data": {
-                                    "has_tenant": _nonempty(out.get("TENANT_ID")),
-                                    "has_client": _nonempty(out.get("CLIENT_ID")),
-                                    "has_secret": _nonempty(out.get("CLIENT_SECRET")),
-                                    "has_site": _nonempty(out.get("SITE_URL")),
-                                    "has_mongo": _nonempty(out.get("MONGO_URL")),
-                                    "client_id_suffix": (
-                                        (out.get("CLIENT_ID") or "")[-6:]
-                                        if _nonempty(out.get("CLIENT_ID"))
-                                        else None
-                                    ),
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            }
-                        )
-                        + "\n"
-                    )
-                break
-            except OSError:
-                continue
-    except Exception:
-        pass
+    import sys as _sys
+    _sp_diag = {
+        "has_tenant": _nonempty(out.get("TENANT_ID")),
+        "has_client": _nonempty(out.get("CLIENT_ID")),
+        "has_secret": _nonempty(out.get("CLIENT_SECRET")),
+        "has_resource": _nonempty(out.get("RESOURCE")),
+        "has_site": _nonempty(out.get("SITE_URL")),
+        "has_drive": _nonempty(out.get("DRIVE_ID")),
+        "has_folder": _nonempty(out.get("FOLDER_ID")),
+        "has_mongo": _nonempty(out.get("MONGO_URL")),
+        "has_db": _nonempty(out.get("DB_NAME")),
+        "client_id_suffix": (out.get("CLIENT_ID") or "")[-6:] if _nonempty(out.get("CLIENT_ID")) else None,
+        "tenant_id_suffix": (out.get("TENANT_ID") or "")[-6:] if _nonempty(out.get("TENANT_ID")) else None,
+    }
+    print(f"DIAG sharepoint.py: config = {json.dumps(_sp_diag)}", file=_sys.stderr, flush=True)
     # endregion
     return out
 
@@ -200,27 +176,24 @@ class SharePointClient:
                     self.download_file(file_url, item['name'])
 
     def round_numeric_values(x):
-        numeric_value = pd.to_numeric(x, errors='coerce')  # Convert to number if possible
-        if pd.notna(numeric_value):  # Check if it's a valid number
-            return round(numeric_value, 2)  # Round if it's a number
+        numeric_value = pd.to_numeric(x, errors='coerce')
+        if pd.notna(numeric_value):
+            return round(numeric_value, 2)
         return x 
     
     def transform(self, df):
-        df.columns = df.iloc[0]  # Assign first row as column names
-        df = df[1:].reset_index(drop=True)  # Remove first row from data
+        df.columns = df.iloc[0]
+        df = df[1:].reset_index(drop=True)
         if df['CUR_MKT_CAP'].isna().all():
             st.error("All values in CUR_MKT_CAP are null. Please check the file.")
             return
-        # Find the index of the "SCORING" column
         if "SCORING" in df.columns:
-            scoring_index = df.columns.get_loc("SCORING") + 1  # Keep up to "SCORING" (inclusive)
-            df = df.iloc[:, :scoring_index]  # Keep only required columns
+            scoring_index = df.columns.get_loc("SCORING") + 1
+            df = df.iloc[:, :scoring_index]
 
-        # Convert numeric values to float and round them
         df = df.map(lambda x: round(float(x), 2) if str(x).replace('.', '', 1).isdigit() else x)
 
         df.columns = df.columns.str.strip()
-        # Strip and normalize spaces in all string cells
         df = df.map(lambda x: ' '.join(x.split()) if isinstance(x, str) else x)
 
         json_data = df.to_dict(orient="records")
@@ -239,4 +212,3 @@ class SharePointClient:
         drive_id = self._secrets.get("DRIVE_ID") or os.getenv("DRIVE_ID")
         folder_id = self._secrets.get("FOLDER_ID") or os.getenv("FOLDER_ID")
         self.download_folder_contents(site_id, drive_id, folder_id)
-
