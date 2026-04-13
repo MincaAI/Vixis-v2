@@ -22,6 +22,24 @@ _SHAREPOINT_KEYS = (
     "DB_NAME",
 )
 
+# Azure often sets CLIENT_ID for Streamlit login (Minca app) — SharePoint/Graph needs VIXIS app.
+# Prefer these env vars for client credentials so they never clash with auth CLIENT_ID.
+_CRED_ENV_ALIASES = {
+    "TENANT_ID": ("SHAREPOINT_TENANT_ID", "VIXIS_TENANT_ID", "TENANT_ID"),
+    "CLIENT_ID": (
+        "SHAREPOINT_CLIENT_ID",
+        "GRAPH_CLIENT_ID",
+        "VIXIS_CLIENT_ID",
+        "CLIENT_ID",
+    ),
+    "CLIENT_SECRET": (
+        "SHAREPOINT_CLIENT_SECRET",
+        "GRAPH_CLIENT_SECRET",
+        "VIXIS_CLIENT_SECRET",
+        "CLIENT_SECRET",
+    ),
+}
+
 
 def _nonempty(val):
     if val is None:
@@ -34,31 +52,80 @@ def _nonempty(val):
 def _get_sharepoint_secrets():
     """Merge [sharepoint] / [mongodb] from st.secrets with Azure App Service / .env vars.
 
-    Uses st.secrets["section"] (bracket access) because Streamlit's AttrDict
-    does not reliably support .get() for TOML sections.  Broad except to
-    handle KeyError, FileNotFoundError, and any Streamlit-internal exceptions.
+    If TOML contains empty strings, dict.get(key, os.getenv) would NOT fall back to env;
+    we fill missing/empty keys from os.environ (and RESSOURCE typo for RESOURCE).
     """
     out = {}
     try:
-        section = st.secrets["sharepoint"]
-        out.update({key: section[key] for key in section})
+        sp = st.secrets.get("sharepoint", {})
+        if isinstance(sp, dict):
+            out.update(sp)
     except Exception:
         pass
     for sec_name in ("mongodb", "mongo"):
         try:
-            block = st.secrets[sec_name]
-            for k in ("MONGO_URL", "DB_NAME"):
-                if k in block:
-                    out[k] = block[k]
+            block = st.secrets.get(sec_name, {})
+            if isinstance(block, dict):
+                for k in ("MONGO_URL", "DB_NAME"):
+                    if k in block:
+                        out[k] = block[k]
         except Exception:
             pass
+    for cred_k, aliases in _CRED_ENV_ALIASES.items():
+        if not _nonempty(out.get(cred_k)):
+            for alias in aliases:
+                v = os.getenv(alias)
+                if _nonempty(v):
+                    out[cred_k] = v.strip() if isinstance(v, str) else v
+                    break
     for k in _SHAREPOINT_KEYS:
+        if k in _CRED_ENV_ALIASES:
+            continue
         if not _nonempty(out.get(k)):
             v = os.getenv(k)
             if k == "RESOURCE" and not _nonempty(v):
                 v = os.getenv("RESSOURCE")
             if _nonempty(v):
                 out[k] = v.strip() if isinstance(v, str) else v
+    # region agent log
+    try:
+        import time
+        for _lp in (
+            "/Users/tanguymoutte/Vixis-main/.cursor/debug-2882f5.log",
+            "/tmp/vixis_sharepoint_debug.ndjson",
+        ):
+            try:
+                with open(_lp, "a") as _f:
+                    _f.write(
+                        json.dumps(
+                            {
+                                "sessionId": "2882f5",
+                                "hypothesisId": "H-env-merge",
+                                "location": "sharepoint.py:_get_sharepoint_secrets",
+                                "message": "merged config (no secrets)",
+                                "data": {
+                                    "has_tenant": _nonempty(out.get("TENANT_ID")),
+                                    "has_client": _nonempty(out.get("CLIENT_ID")),
+                                    "has_secret": _nonempty(out.get("CLIENT_SECRET")),
+                                    "has_site": _nonempty(out.get("SITE_URL")),
+                                    "has_mongo": _nonempty(out.get("MONGO_URL")),
+                                    "client_id_suffix": (
+                                        (out.get("CLIENT_ID") or "")[-6:]
+                                        if _nonempty(out.get("CLIENT_ID"))
+                                        else None
+                                    ),
+                                },
+                                "timestamp": int(time.time() * 1000),
+                            }
+                        )
+                        + "\n"
+                    )
+                break
+            except OSError:
+                continue
+    except Exception:
+        pass
+    # endregion
     return out
 
 
@@ -73,8 +140,10 @@ class SharePointClient:
         if not self.tenant_id or not self.client_id or not self.client_secret:
             raise ValueError(
                 "SharePoint/MongoDB non configurés. "
-                "Streamlit Cloud : Secrets → section [sharepoint] avec TENANT_ID, CLIENT_ID, CLIENT_SECRET, SITE_URL, DRIVE_ID, FOLDER_ID, MONGO_URL, DB_NAME. "
-                "Azure App Service : variables d'environnement avec les mêmes noms (pas de chaînes vides)."
+                "Azure : définir SHAREPOINT_TENANT_ID, SHAREPOINT_CLIENT_ID, SHAREPOINT_CLIENT_SECRET "
+                "(app VIXIS / Graph — pas le même CLIENT_ID que le login Streamlit), "
+                "plus SITE_URL, DRIVE_ID, FOLDER_ID, MONGO_URL, DB_NAME. "
+                "Ou section [sharepoint] dans secrets.toml."
             )
         self.base_url = f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/token"
         self.headers = {'Content-Type': 'application/x-www-form-urlencoded'}
@@ -89,7 +158,14 @@ class SharePointClient:
         }
         
         response = requests.post(self.base_url, headers=self.headers, data=body)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            detail = response.text[:1200] if response.text else str(e)
+            raise RuntimeError(
+                f"Échec token Microsoft Graph (client credentials), HTTP {response.status_code}. "
+                f"Vérifie SHAREPOINT_CLIENT_ID / SECRET (app VIXIS), pas l'app login. Détail: {detail}"
+            ) from e
         return response.json().get('access_token')
 
     def get_site_id(self, site_url):
