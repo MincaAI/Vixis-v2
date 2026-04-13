@@ -1,5 +1,5 @@
-# Docs: https://github.com/Azure/webapps-deploy
-# Deploy uses Publish Profile (no az login / subscription RBAC needed — avoids "No subscriptions found").
+# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
+# More GitHub Actions for Azure: https://github.com/Azure/actions
 
 name: Build and deploy Python app to Azure Web App - vixis-app
 
@@ -41,6 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     permissions:
+      id-token: write
       contents: read
 
     steps:
@@ -49,12 +50,16 @@ jobs:
         with:
           name: python-app
 
-      # Uses Publish Profile XML (Azure Portal → App Service → Download publish profile).
-      # GitHub repo → Settings → Secrets → AZURE_WEBAPP_PUBLISH_PROFILE (entire .PublishSettings file content).
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_A0DF478140DF4B2697F2081847D752C6 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_55CF0DB1DACB4719B74DEC13A2321260 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_73B7799515594526943C922A19E0021E }}
+
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
         with:
-          app-name: vixis-app
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          slot-name: Production
+          app-name: 'vixis-app'
+          slot-name: 'Production'
